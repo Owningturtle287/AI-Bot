@@ -1,8 +1,10 @@
-const cacheName = 'neural-workshop-v1';
+import { pauseQueue, wakeQueue } from './queue-runner.mjs';
+
+const cacheName = 'neural-workshop-v2';
 const shell = [
-  './', './index.html', './style.css', './app.mjs', './model.mjs', './storage.mjs',
-  './trainer.mjs', './zip.mjs', './manifest.webmanifest', './assets/icon-192.png',
-  './assets/icon-512.png', './assets/icons.png', './assets/algebra-starter.zip'
+  './', './index.html', './style.css', './theme.js', './app.mjs', './model.mjs', './storage.mjs',
+  './trainer.mjs', './zip.mjs', './queue-runner.mjs', './queue-worker.mjs', './manifest.webmanifest',
+  './assets/icon-192.png', './assets/icon-512.png', './assets/icons.png', './assets/algebra-starter.zip'
 ];
 
 self.addEventListener('install', event => {
@@ -26,4 +28,19 @@ self.addEventListener('fetch', event => {
     }
     return response;
   }).catch(async () => (await caches.match(event.request)) || Response.error()));
+});
+
+async function broadcast(message) {
+  for (const client of await self.clients.matchAll({ type: 'window', includeUncontrolled: true })) {
+    if (client.url.startsWith(self.registration.scope)) client.postMessage(message);
+  }
+}
+
+self.addEventListener('message', event => {
+  if (event.data === 'queue:pause') pauseQueue();
+  if (event.data === 'queue:wake') event.waitUntil(wakeQueue(broadcast));
+});
+
+self.addEventListener('sync', event => {
+  if (event.tag === 'training-queue') event.waitUntil(wakeQueue(broadcast));
 });

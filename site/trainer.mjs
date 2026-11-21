@@ -26,21 +26,27 @@ function parse(line) {
   return [{ prompt: [prompt.trim(), input].filter(Boolean).join('\n'), response: response.trim() }];
 }
 
-async function run({ file, model, epochs, rate }, post) {
+async function run({ file, model, epochs, rate, cursor }, post, { checkpoint, signal } = {}) {
   const { entries, expanded } = await readZip(file);
   const train = trainer(model, rate);
-  let previous = 0;
-  let records = 0;
-  let skipped = 0;
-  let loss = null;
+  let records = cursor?.records ?? 0;
+  let skipped = cursor?.skipped ?? 0;
+  let loss = cursor?.loss ?? null;
   let lastReport = 0;
-  const completed = [];
-  for (let epoch = 1; epoch <= epochs; epoch++) {
-    let usable = 0;
-    for (const entry of entries) {
+  let lastSave = performance.now();
+
+  for (let epoch = cursor?.epoch ?? 1; epoch <= epochs; epoch++) {
+    const resumingEpoch = cursor?.epoch === epoch;
+    let usable = resumingEpoch ? cursor.usable : 0;
+    const firstEntry = resumingEpoch ? cursor.entry : 0;
+    let previous = expanded * (epoch - 1);
+    for (let i = 0; i < firstEntry; i++) previous += entries[i].length;
+    for (let index = firstEntry; index < entries.length; index++) {
+      const entry = entries[index];
       const source = entry.name.split('/').at(-1).slice(0, 120);
       const jsonl = /\.jsonl$/i.test(source);
-      let paragraph = '';
+      const resumeLine = resumingEpoch && index === firstEntry ? cursor.line : 0;
+      let paragraph = resumeLine ? cursor.paragraph : '';
       let lineNumber = 0;
       function learn(pair) {
         const next = train({ prompt: pair.prompt.slice(0, 4000), response: pair.response.slice(0, 12000), source }, epoch === 1);
@@ -53,11 +59,16 @@ async function run({ file, model, epochs, rate }, post) {
         paragraph = '';
       }
       for await (const line of lines(file, entry, bytes => {
-        if (performance.now() - lastReport < 100) return;
+        if (performance.now() - lastReport < 180) return;
         lastReport = performance.now();
         post({ type: 'progress', percent: (previous + bytes) / (expanded * epochs), epoch, records, skipped, loss, source });
       })) {
         lineNumber++;
+        if (signal?.aborted) {
+          if (checkpoint && lineNumber > resumeLine) await saveCursor(lineNumber - 1);
+          return { type: 'paused' };
+        }
+        if (lineNumber <= resumeLine) continue;
         if (jsonl && line.trim()) {
           let pairs;
           try {
@@ -79,24 +90,21 @@ async function run({ file, model, epochs, rate }, post) {
             }
           }
         }
+        if (checkpoint && lineNumber % 512 === 0 && performance.now() - lastSave >= 12000) {
+          await saveCursor(lineNumber);
+        }
       }
       learnParagraph();
       previous += entry.length;
-      if (epoch === 1) completed.push(source);
+
+      async function saveCursor(line) {
+        lastSave = performance.now();
+        await checkpoint({ epoch, entry: index, line, paragraph, records, skipped, loss, usable }, model);
+      }
     }
     if (!usable) throw new Error('No usable examples. Include prompt and response pairs or nonempty text.');
   }
-  return { type: 'complete', model, records, skipped, loss, files: completed.length };
-}
-
-if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
-  self.onmessage = async ({ data }) => {
-    try {
-      self.postMessage(await run(data, result => self.postMessage(result)));
-    } catch (error) {
-      self.postMessage({ type: 'error', message: error.message || 'Training could not finish.' });
-    }
-  };
+  return { type: 'complete', model, records, skipped, loss };
 }
 
 export { run };

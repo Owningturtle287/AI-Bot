@@ -9,6 +9,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./assets/icon-192.png">
   <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <script src="./theme.js"></script>
   <link rel="stylesheet" href="./style.css">
   <script type="module" src="./app.mjs"></script>
 </head>
@@ -24,6 +25,7 @@
       <div class="sidebar-label">History</div>
       <nav class="history" id="history" aria-label="Chat history"></nav>
       <div class="sidebar-footer">
+        <button class="side-link" id="theme-toggle" aria-pressed="false"><span class="theme-icon" aria-hidden="true">☼</span><span>Light mode</span></button>
         <button class="side-link" id="install"><i class="icon device"></i> Install app</button>
         <div class="privacy"><i class="icon shield"></i><span>Stored on this device</span></div>
       </div>
@@ -54,7 +56,7 @@
             </button>
             <button class="starter" id="upload-card">
               <span class="card-icon lavender"><i class="icon upload"></i></span>
-              <span><strong>Upload a dataset</strong><small>Bring your own ZIP</small></span>
+              <span><strong>Add training files</strong><small>Queue your ZIPs together</small></span>
               <i class="icon next card-end"></i>
             </button>
           </div>
@@ -103,33 +105,35 @@
             <h3 id="dataset-label">Training data</h3>
             <button class="quiet small" id="formats">Formats</button>
           </div>
-          <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+          <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" multiple hidden>
           <button class="dropzone" id="dropzone" type="button" disabled>
             <span class="drop-icon"><i class="icon upload"></i></span>
-            <strong>Drop a ZIP file here</strong>
-            <span>or <b>browse files</b></span>
+            <strong>Drop ZIP files here</strong>
+            <span>or <b>select files</b></span>
             <small>JSONL, TXT or Markdown inside</small>
           </button>
-          <div class="selected-file" id="selected-file" hidden>
-            <span class="file-icon"><i class="icon file-icon-shape"></i></span>
-            <div><strong id="file-name"></strong><small id="file-size"></small></div>
-            <button class="icon-button" id="remove-file" aria-label="Remove selected ZIP"><i class="icon close"></i></button>
+          <div class="dataset-actions">
+            <button class="quiet sample-link" id="load-starter" disabled><i class="icon book"></i> Algebra pack</button>
+            <button class="quiet sample-link" id="add-links" disabled><i class="icon plus"></i> ZIP links</button>
           </div>
-          <button class="quiet sample-link" id="load-starter" disabled><i class="icon book"></i> Load algebra starter pack</button>
           <details class="settings">
-            <summary>Training settings<i class="icon chevron"></i></summary>
+            <summary>Settings for new ZIPs<i class="icon chevron"></i></summary>
             <div class="training-settings">
               <label>Epochs<select id="epochs"><option value="1">1 pass</option><option value="2">2 passes</option><option value="4">4 passes</option><option value="8">8 passes</option></select></label>
               <label>Learning rate<select id="rate"><option value="0.04">0.04</option><option value="0.08" selected>0.08</option><option value="0.12">0.12</option></select></label>
             </div>
           </details>
-          <button class="train" id="train" disabled><i class="icon bolt"></i><span>Start training</span></button>
+          <div class="queue-heading"><h3>Training queue</h3><span id="queue-count">0 files</span></div>
+          <ol class="queue-list" id="queue-list" aria-label="ZIP files in training order" hidden></ol>
+          <p class="queue-empty" id="queue-empty">ZIPs train in the order you add them.</p>
+          <button class="train" id="train" disabled><i class="icon bolt"></i><span>Start queue</span></button>
           <div class="run" id="run" hidden>
             <div class="run-line"><strong id="run-label"></strong><span id="run-percent"></span></div>
             <progress id="progress" max="1" value="0" aria-label="Training progress"></progress>
             <small id="run-details"></small>
           </div>
           <p class="notice" id="notice" role="status" hidden></p>
+          <p class="queue-help">The queue keeps running in the background when your browser allows it. If your phone suspends it, reopen the app to resume.</p>
         </section>
       </div>
     </aside>
@@ -152,9 +156,18 @@
       <p>Put UTF-8 text files in an unencrypted ZIP. For chat, use JSONL with one complete prompt and answer per line.</p>
       <pre>{"prompt":"What is slope?","response":"Slope is rise divided by run."}</pre>
       <p>JSONL also accepts instruction/output and user/assistant messages. TXT and Markdown train on passages and can be searched for excerpts.</p>
-      <p>For large collections, use several independently trainable ZIPs. Keep the app open during training.</p>
+      <p>For large collections, add several independently trainable ZIPs. The queue saves progress on this device as it goes.</p>
       <a class="download" href="./assets/algebra-starter.zip" download><i class="icon upload"></i> Download the algebra starter ZIP</a>
     </div>
+  </dialog>
+
+  <dialog id="links-dialog">
+    <form id="links-form" class="dialog-content">
+      <div class="dialog-heading"><h2>Queue ZIP downloads</h2><button type="button" class="icon-button" data-close aria-label="Close"><i class="icon close"></i></button></div>
+      <p>Enter one direct HTTPS ZIP link per line. Each file downloads before it trains. For a link that opens a download page or requires sign-in, download the ZIP first and select the file.</p>
+      <label class="field" for="zip-links">Direct ZIP links<textarea id="zip-links" rows="4" required></textarea></label>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close>Cancel</button><button class="primary" type="submit">Add to queue</button></div>
+    </form>
   </dialog>
 
   <dialog id="install-dialog">

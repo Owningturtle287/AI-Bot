@@ -29,7 +29,7 @@ jobs:
         run: |
           python3 tools/icons.py site/assets
           python3 tools/algebra_pack.py site/assets/algebra-starter.zip
-          for file in site/*.mjs site/sw.js; do node --check "$file"; done
+          for file in site/*.mjs site/*.js; do node --check "$file"; done
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

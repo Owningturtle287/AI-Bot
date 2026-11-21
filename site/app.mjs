@@ -1,9 +1,12 @@
 import { generate, makeModel, matchExample, parameters, WIDTHS } from './model.mjs';
-import { read, save, saveCheckpoint } from './storage.mjs';
+import { enqueue, get, read, removeJob, save, setQueue } from './storage.mjs';
 
 const $ = id => document.getElementById(id);
 const format = new Intl.NumberFormat();
-const state = { profiles: [], chats: [], chat: null, dataset: null, job: null, loadingPack: false, sending: false };
+const state = {
+  profiles: [], chats: [], chat: null, jobs: [], running: false, adding: false,
+  loadingPack: false, sending: false, queueRead: 0
+};
 const activeProfile = () => state.profiles.find(profile => profile.id === state.chat?.profileId) || state.profiles[0];
 const layout = $('layout');
 const input = $('message');
@@ -147,27 +150,117 @@ function updateProfile() {
 
 function updateTraining() {
   const enabled = Boolean(activeProfile());
-  const busy = Boolean(state.job);
-  modelSelect.disabled = !enabled || busy || state.sending;
-  $('new-model').disabled = !enabled || busy || state.sending;
+  const adding = state.adding || state.loadingPack;
+  modelSelect.disabled = !enabled || state.sending;
+  $('new-model').disabled = !enabled || state.sending;
   $('new-chat').disabled = !enabled || state.sending;
-  $('load-starter').disabled = !enabled || busy || state.loadingPack;
-  $('starter-card').disabled = !enabled || busy || state.loadingPack;
-  $('upload-card').disabled = !enabled || busy;
-  dropzone.disabled = !enabled || busy;
-  $('remove-file').disabled = busy;
-  $('epochs').disabled = busy;
-  $('rate').disabled = busy;
-  dropzone.hidden = Boolean(state.dataset);
-  $('selected-file').hidden = !state.dataset;
-  trainButton.disabled = busy ? state.job.saving : !enabled || !state.dataset || state.loadingPack;
-  trainButton.classList.toggle('stop', busy && !state.job.saving);
-  trainButton.querySelector('span').textContent = busy ? (state.job.saving ? 'Saving checkpoint…' : 'Stop training') : 'Start training';
-  if (state.dataset) {
-    $('file-name').textContent = state.dataset.name;
-    $('file-name').title = state.dataset.name;
-    $('file-size').textContent = formatBytes(state.dataset.size);
+  $('load-starter').disabled = !enabled || adding;
+  $('starter-card').disabled = !enabled || adding;
+  $('upload-card').disabled = !enabled || adding;
+  $('add-links').disabled = !enabled || adding;
+  dropzone.disabled = !enabled || adding;
+  trainButton.disabled = state.settingQueue || !state.jobs.length || (!state.running && adding);
+  trainButton.classList.toggle('stop', state.running);
+  trainButton.querySelector('span').textContent = state.running ? 'Pause queue'
+    : state.jobs[0]?.stage === 'Failed' ? 'Retry queue'
+    : state.jobs[0]?.stage ? 'Resume queue' : 'Start queue';
+}
+
+function renderQueue() {
+  const { jobs, running } = state;
+  $('queue-count').textContent = format.format(jobs.length) + (jobs.length === 1 ? ' file' : ' files');
+  $('queue-empty').hidden = Boolean(jobs.length);
+  const list = $('queue-list');
+  list.hidden = !jobs.length;
+  const top = list.scrollTop;
+  const contents = document.createDocumentFragment();
+  jobs.forEach((job, index) => {
+    const row = document.createElement('li');
+    row.className = 'selected-file';
+    const icon = document.createElement('span');
+    icon.className = 'file-icon';
+    const glyph = document.createElement('i');
+    glyph.className = 'icon file-icon-shape';
+    icon.append(glyph);
+    const info = document.createElement('div');
+    const name = document.createElement('strong');
+    const details = document.createElement('small');
+    name.textContent = job.name;
+    name.title = job.name;
+    const stage = job.stage === 'Failed' ? 'Failed'
+      : index === 0 && job.stage ? (running ? job.stage : 'Paused') : 'Queued';
+    const profile = state.profiles.find(item => item.id === job.profileId);
+    details.textContent = [stage, job.size ? formatBytes(job.size) : 'Download', profile?.name].filter(Boolean).join(' · ');
+    details.title = details.textContent;
+    info.append(name, details);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'icon-button';
+    remove.setAttribute('aria-label', 'Remove ' + job.name);
+    const cross = document.createElement('i');
+    cross.className = 'icon close';
+    remove.append(cross);
+    remove.disabled = index === 0 && running;
+    remove.addEventListener('click', async () => {
+      try {
+        await removeJob(job.id);
+        say();
+        await refreshQueue();
+      } catch (error) { say(error.message, true); }
+    });
+    row.append(icon, info, remove);
+    contents.append(row);
+  });
+  list.replaceChildren(contents);
+  list.scrollTop = top;
+  const head = jobs[0];
+  const stage = head?.stage;
+  if (!head || !running || !stage) {
+    $('run').hidden = true;
+    state.progressJob = null;
   }
+  else if (state.progressJob !== head.id || state.progressStage !== stage) {
+    state.progressJob = head.id;
+    state.progressStage = stage;
+    $('run').hidden = false;
+    $('run-label').textContent = stage + '…';
+    $('run-percent').textContent = '';
+    $('progress').removeAttribute('value');
+    $('run-details').textContent = head.name;
+  }
+  if (head?.error) say(head.name + ' · ' + head.error, true);
+  updateTraining();
+}
+
+async function refreshQueue(refreshProfiles = false) {
+  const readNumber = ++state.queueRead;
+  const [jobs, control, profiles] = await Promise.all([
+    read('queue'), get('settings', 'training-queue'), refreshProfiles ? read('profiles') : null
+  ]);
+  if (profiles) {
+    for (const profile of profiles) {
+      const position = state.profiles.findIndex(item => item.id === profile.id);
+      if (position < 0) state.profiles.push(profile);
+      else if ((state.profiles[position].revision ?? 0) <= (profile.revision ?? 0)) state.profiles[position] = profile;
+    }
+    updateProfile();
+  }
+  if (readNumber !== state.queueRead) return;
+  state.jobs = jobs;
+  state.running = Boolean(control?.running);
+  const last = control?.last;
+  if (last && state.lastResult !== last.id) {
+    state.lastResult = last.id;
+    if (!jobs[0]?.error) {
+      const skipped = last.skipped ? ' Skipped ' + format.format(last.skipped) + ' unsupported rows.' : '';
+      say('Checkpoint saved. Added ' + format.format(last.records) + ' examples from ' + last.name + '.' + skipped);
+    }
+    if (last.starter && activeProfile()?.id === last.profileId && !input.value && !state.chat?.messages.length) {
+      input.value = 'What is slope?';
+      updateComposer();
+    }
+  }
+  renderQueue();
 }
 
 function updateComposer() {
@@ -210,6 +303,8 @@ async function boot() {
     if (saved?.mode === 'neural') modeSelect.value = 'neural';
     input.disabled = false;
     render();
+    await refreshQueue();
+    wakeTraining();
   } catch (error) {
     saveError(error);
   }
@@ -290,27 +385,51 @@ workOverlay.addEventListener('change', () => panel());
 chatOverlay.addEventListener('change', () => panel());
 $('formats').addEventListener('click', () => $('formats-dialog').showModal());
 
-function setDataset(file) {
-  if (!file || state.job) return;
-  if (!/\.zip$/i.test(file.name) || file.size < 22) {
-    say('Choose a nonempty .zip archive.', true);
-    return;
-  }
-  state.dataset = file;
-  say();
+async function addItems(items, starter = false) {
+  const profile = activeProfile();
+  if (!profile || state.adding || !items.length) return;
+  state.adding = true;
   updateTraining();
+  const settings = { profileId: profile.id, epochs: Number($('epochs').value), rate: Number($('rate').value) };
+  let added = 0;
+  let invalid = 0;
+  try {
+    for (const { file, url, name } of items) {
+      if (file && (!/\.zip$/i.test(file.name) || file.size < 22)) {
+        invalid++;
+        continue;
+      }
+      say('Saving ZIP ' + (added + invalid + 1) + ' of ' + items.length + '…');
+      await enqueue({ ...settings, url, name, size: file?.size, starter }, file);
+      added++;
+    }
+    say(added ? format.format(added) + (added === 1 ? ' ZIP added to the queue.' : ' ZIPs added to the queue.')
+      + (invalid ? ' Skipped ' + invalid + ' invalid files.' : '') : 'Choose nonempty .zip files.', !added);
+  } catch (error) {
+    const detail = error.name === 'QuotaExceededError' ? 'This device ran out of browser storage. Train or remove some queued ZIPs, then add the rest.' : error.message;
+    say(added + ' of ' + items.length + ' ZIPs saved. ' + detail, true);
+  } finally {
+    state.adding = false;
+    await refreshQueue().catch(saveError);
+    updateTraining();
+    wakeTraining();
+  }
 }
 
-function chooseFile() {
-  if (!state.job && activeProfile()) fileInput.click();
+function addFiles(files) {
+  void addItems(Array.from(files, file => ({ file, name: file.name })));
 }
-dropzone.addEventListener('click', chooseFile);
+
+function chooseFiles() {
+  if (!dropzone.disabled) fileInput.click();
+}
+dropzone.addEventListener('click', chooseFiles);
 $('upload-card').addEventListener('click', event => {
   selectPanel('workshop', event.currentTarget, dropzone);
-  chooseFile();
+  chooseFiles();
 });
 fileInput.addEventListener('change', () => {
-  setDataset(fileInput.files[0]);
+  addFiles(fileInput.files);
   fileInput.value = '';
 });
 for (const eventName of ['dragover', 'drop']) {
@@ -319,30 +438,49 @@ for (const eventName of ['dragover', 'drop']) {
   });
 }
 dropzone.addEventListener('dragover', event => {
-  if (!state.job && event.dataTransfer.types.includes('Files')) dropzone.classList.add('dragging');
+  if (!dropzone.disabled && event.dataTransfer.types.includes('Files')) dropzone.classList.add('dragging');
 });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragging'));
 dropzone.addEventListener('drop', event => {
   dropzone.classList.remove('dragging');
-  setDataset(event.dataTransfer.files[0]);
+  addFiles(event.dataTransfer.files);
 });
-$('remove-file').addEventListener('click', () => {
-  state.dataset = null;
-  say();
-  updateTraining();
-  dropzone.focus();
+
+const linksField = $('zip-links');
+$('add-links').addEventListener('click', () => $('links-dialog').showModal());
+linksField.addEventListener('input', () => linksField.setCustomValidity(''));
+$('links-form').addEventListener('submit', event => {
+  event.preventDefault();
+  let items;
+  try {
+    items = linksField.value.trim().split(/\r?\n/).map(line => line.trim()).filter(Boolean).map((line, index) => {
+      const url = new URL(line);
+      if (url.protocol !== 'https:' || url.username || url.password) throw new Error();
+      const filename = url.pathname.split('/').pop();
+      const name = /\.zip$/i.test(filename) ? filename : 'Download ' + (index + 1) + ' · ' + url.hostname;
+      return { name, url: url.href };
+    });
+    if (!items.length) throw new Error();
+  } catch {
+    linksField.setCustomValidity('Enter one valid direct HTTPS link per line.');
+    linksField.reportValidity();
+    return;
+  }
+  $('links-dialog').close();
+  linksField.value = '';
+  void addItems(items);
 });
 
 async function loadStarter() {
-  if (state.job || state.loadingPack || !activeProfile()) return;
+  if (state.loadingPack || state.adding || !activeProfile()) return;
   state.loadingPack = true;
   say('Loading the algebra starter pack…');
   updateTraining();
   try {
     const response = await fetch('./assets/algebra-starter.zip');
     if (!response.ok) throw new Error('The starter pack could not load. Try again or upload a ZIP.');
-    setDataset(new File([await response.blob()], 'algebra-starter.zip', { type: 'application/zip' }));
-    say('Starter pack selected. Start training to learn from 1,212 examples.');
+    const file = new File([await response.blob()], 'algebra-starter.zip', { type: 'application/zip' });
+    await addItems([{ file, name: file.name }], true);
     trainButton.scrollIntoView({ block: 'nearest' });
   } catch (error) {
     say(error.message, true);
@@ -355,90 +493,96 @@ async function loadStarter() {
 $('load-starter').addEventListener('click', loadStarter);
 $('starter-card').addEventListener('click', event => {
   selectPanel('workshop', event.currentTarget, $('close-workshop'));
-  loadStarter();
+  void loadStarter();
 });
 
-function finishJob(job) {
-  job.worker.terminate();
-  state.job = null;
-  $('run').hidden = true;
-  updateProfile();
+let registration;
+let fallback;
+const queueService = () => {
+  const worker = registration?.active || navigator.serviceWorker?.controller;
+  return worker && new URL(worker.scriptURL).search === '?v=2' ? worker : null;
+};
+
+function receiveTraining({ data }) {
+  if (data?.type === 'queue:changed') {
+    void refreshQueue(data.refreshProfiles).catch(saveError);
+  } else if (data?.type === 'queue:error') {
+    say(data.message, true);
+  } else if (data?.type === 'queue:progress' && state.running && state.jobs[0]?.id === data.id) {
+    const fraction = Math.min(0.99, Math.max(0, data.percent));
+    $('run').hidden = false;
+    $('run-label').textContent = 'Epoch ' + data.epoch + ' of ' + state.jobs[0].epochs;
+    $('run-percent').textContent = Math.round(fraction * 100) + '%';
+    $('progress').value = fraction;
+    $('run-details').textContent = format.format(data.records) + ' examples · ' + data.source;
+  }
 }
 
-trainButton.addEventListener('click', () => {
-  if (state.job) {
-    if (state.job.saving) return;
-    finishJob(state.job);
-    say('Training stopped. The previous checkpoint is ready to use.');
-    return;
-  }
-  const profile = activeProfile();
-  if (!profile || !state.dataset) return;
-  let worker;
+function wakeTraining() {
+  if (!state.running) return;
+  const service = queueService();
   try {
-    worker = new Worker(new URL('./trainer.mjs', import.meta.url), { type: 'module' });
-  } catch (error) {
-    say(error.message, true);
-    return;
-  }
-  const epochs = Number($('epochs').value);
-  const rate = Number($('rate').value);
-  const job = { worker, profile, saving: false };
-  state.job = job;
-  say();
-  $('run').hidden = false;
-  $('run-label').textContent = 'Reading ZIP…';
-  $('run-percent').textContent = '0%';
-  $('progress').value = 0;
-  $('run-details').textContent = state.dataset.name;
-  updateTraining();
-
-  worker.onerror = event => {
-    if (state.job !== job) return;
-    finishJob(job);
-    say(event.message || 'The training worker stopped unexpectedly.', true);
-  };
-  worker.onmessage = async ({ data }) => {
-    if (state.job !== job) return;
-    if (data.type === 'progress') {
-      const fraction = Math.min(0.99, Math.max(0, data.percent));
-      $('run-label').textContent = 'Epoch ' + data.epoch + ' of ' + epochs;
-      $('run-percent').textContent = Math.round(fraction * 100) + '%';
-      $('progress').value = fraction;
-      $('run-details').textContent = format.format(data.records) + ' examples · ' + data.source;
-      return;
-    }
-    if (data.type === 'error') {
-      finishJob(job);
-      say(data.message, true);
-      return;
-    }
-    if (data.type !== 'complete') return;
-    job.saving = true;
-    updateTraining();
-    $('run-label').textContent = 'Saving checkpoint…';
-    $('run-percent').textContent = '100%';
-    $('progress').value = 1;
-    const revision = profile.revision ?? 0;
-    const updated = { ...profile, model: data.model, revision: revision + 1 };
-    try {
-      await saveCheckpoint(updated, revision);
-      state.profiles = state.profiles.map(item => item.id === profile.id ? updated : item);
-      const skipped = data.skipped ? ' Skipped ' + format.format(data.skipped) + ' unsupported rows.' : '';
-      say('Checkpoint saved. Added ' + format.format(data.records) + ' examples.' + skipped);
-      if (state.dataset?.name === 'algebra-starter.zip' && !input.value) {
-        input.value = 'What is slope?';
-        updateComposer();
+    if (service) service.postMessage('queue:wake');
+    else {
+      if (!fallback) {
+        fallback = new Worker(new URL('./queue-worker.mjs', import.meta.url), { type: 'module' });
+        fallback.onmessage = receiveTraining;
+        fallback.onerror = event => say(event.message || 'The training worker stopped. Reopen the app to resume.', true);
       }
-      state.dataset = null;
-    } catch (error) {
-      saveError(error);
-    } finally {
-      finishJob(job);
+      fallback.postMessage('queue:wake');
     }
-  };
-  worker.postMessage({ file: state.dataset, model: profile.model, epochs, rate });
+  } catch (error) { say(error.message, true); }
+}
+
+trainButton.addEventListener('click', async () => {
+  if (state.settingQueue) return;
+  state.settingQueue = true;
+  const starting = !state.running;
+  updateTraining();
+  try {
+    await setQueue({ running: starting });
+    state.running = starting;
+    if (starting) {
+      say();
+      wakeTraining();
+    } else {
+      queueService()?.postMessage('queue:pause');
+      fallback?.postMessage('queue:pause');
+      say('Queue paused. Resume to continue from saved progress.');
+    }
+    await refreshQueue();
+  } catch (error) {
+    saveError(error);
+  } finally {
+    state.settingQueue = false;
+    updateTraining();
+  }
 });
+
+function resumeVisible() {
+  if (!activeProfile()) return;
+  void refreshQueue(true).then(wakeTraining).catch(saveError);
+}
+
+navigator.serviceWorker?.addEventListener('message', receiveTraining);
+navigator.serviceWorker?.addEventListener('controllerchange', resumeVisible);
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.register('./sw.js?v=2', { type: 'module' }).then(result => {
+    registration = result;
+    resumeVisible();
+  }).catch(() => wakeTraining());
+}
+window.addEventListener('online', resumeVisible);
+window.addEventListener('pageshow', resumeVisible);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) resumeVisible();
+  else if (state.running) {
+    void registration?.sync?.register('training-queue').catch(() => {});
+  }
+});
+setInterval(() => {
+  if (!document.hidden && state.running) wakeTraining();
+}, 9000);
 
 function reply(profile, prompt) {
   if (!profile.model.updates) return { text: 'This model is ready to train. Open Training Studio, load the algebra starter pack or upload a ZIP, and choose Start training.' };
@@ -511,6 +655,19 @@ $('install').addEventListener('click', async () => {
   installPrompt = null;
   await prompt.prompt();
 });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(console.warn);
+const themeToggle = $('theme-toggle');
+function applyTheme(theme) {
+  const light = theme === 'light';
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = light ? '#f5f7fa' : '#15171c';
+  themeToggle.setAttribute('aria-pressed', String(light));
+  themeToggle.querySelector('.theme-icon').textContent = light ? '☾' : '☼';
+}
+applyTheme(document.documentElement.dataset.theme || 'dark');
+themeToggle.addEventListener('click', () => {
+  const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  applyTheme(theme);
+  try { localStorage.setItem('workshop-theme', theme); } catch { /* Keep the current view usable. */ }
+});
 
 boot();
