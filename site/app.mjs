@@ -395,7 +395,7 @@ async function addItems(items, starter = false) {
   let invalid = 0;
   try {
     for (const { file, url, name } of items) {
-      if (file && (!/\.zip$/i.test(file.name) || file.size < 22)) {
+      if (file && !await isZip(file)) {
         invalid++;
         continue;
       }
@@ -414,6 +414,13 @@ async function addItems(items, starter = false) {
     updateTraining();
     wakeTraining();
   }
+}
+
+async function isZip(file) {
+  if (file.size < 22) return false;
+  if (/\.zip$/i.test(file.name)) return true;
+  const signature = new DataView(await file.slice(0, 4).arrayBuffer());
+  return signature.getUint32(0, true) === 0x04034b50;
 }
 
 function addFiles(files) {
