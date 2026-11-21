@@ -40,7 +40,7 @@ Use different seeds for additional archives or separate evaluation examples. The
 
 The experimental prompt-conditioned language model trains token embeddings, prompt features, output weights and biases with a sampled next-token objective. Its presets range from 71,680 to 67,403,776 trainable parameters, with hidden widths of 16 to 1,024 and vocabulary capacities of 2,048 to 32,768 tokens. Changing capacity means creating a separate profile. The app allocates its weights when the first ZIP starts training.
 
-The 67.4-million-parameter preset uses about 257 MiB for its Float32 weights. Training and writing checkpoints take additional memory and storage, so the largest presets are intended for desktops. Example answers use the saved example sample. Neural generation loads the weights in a worker. A 50-billion-parameter model would need 200 GB for Float32 weights alone and would require a separate compute backend.
+The 67.4-million-parameter preset allocates about 257 MiB for its Float32 weights during training. Checkpoints store observed token rows and regenerate the untouched rows from the initialization seed. The largest presets are intended for desktops. Example answers use the saved example sample. Neural generation loads the observed rows in a worker. A 50-billion-parameter model would need 200 GB for Float32 weights alone and would require a separate compute backend.
 
 ```sh
 python3 tools/icons.py site/assets

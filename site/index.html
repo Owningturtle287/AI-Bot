@@ -147,10 +147,10 @@
       <label class="field" for="model-size">Model size<select id="model-size" aria-describedby="dialog-shape"></select></label>
       <div class="capacity">
         <div><span>Trainable parameters</span><strong id="dialog-parameters"></strong></div>
-        <div><span>Weight storage</span><strong id="dialog-weights"></strong></div>
+        <div><span>Full weight size</span><strong id="dialog-weights"></strong></div>
       </div>
       <div class="model-detail" id="dialog-shape"></div>
-      <p class="model-detail" id="dialog-desktop" hidden>Use a desktop for this size. Training and checkpoints need additional memory and storage.</p>
+      <p class="model-detail" id="dialog-desktop" hidden>Use a desktop for this size. Training needs additional memory. Checkpoints grow as the model learns new words.</p>
       <div class="dialog-actions"><button type="button" class="quiet" data-close>Cancel</button><button type="submit" class="primary" id="save-model">Create model</button></div>
     </form>
   </dialog>

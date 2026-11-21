@@ -4,7 +4,7 @@ import { enqueue, get, read, removeJob, save, setQueue } from './storage.mjs';
 const $ = id => document.getElementById(id);
 const format = new Intl.NumberFormat();
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 });
-const workerVersion = '?v=3';
+const workerVersion = '?v=4';
 const state = {
   profiles: [], chats: [], chat: null, jobs: [], running: false, adding: false,
   loadingPack: false, sending: false, queueRead: 0
@@ -606,7 +606,7 @@ function resumeVisible() {
 navigator.serviceWorker?.addEventListener('message', receiveTraining);
 navigator.serviceWorker?.addEventListener('controllerchange', resumeVisible);
 if (navigator.serviceWorker) {
-  navigator.serviceWorker.register('./sw.js' + workerVersion, { type: 'module' }).then(result => {
+  navigator.serviceWorker.register('./sw.js' + workerVersion, { type: 'module', updateViaCache: 'none' }).then(result => {
     registration = result;
     resumeVisible();
   }).catch(() => wakeTraining());

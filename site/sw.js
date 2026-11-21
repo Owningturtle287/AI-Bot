@@ -1,6 +1,6 @@
 import { pauseQueue, wakeQueue } from './queue-runner.mjs';
 
-const cacheName = 'neural-workshop-v3';
+const cacheName = 'neural-workshop-v4';
 const shell = [
   './', './index.html', './style.css', './theme.js', './app.mjs', './model.mjs', './storage.mjs',
   './trainer.mjs', './zip.mjs', './queue-runner.mjs', './queue-worker.mjs', './generation-worker.mjs', './manifest.webmanifest',

@@ -35,19 +35,34 @@ export function makeModel(width, vocabulary = VOCABULARY) {
 
 const weightFields = ['input', 'prompts', 'output', 'bias'];
 
-// Store large weights as blobs so listing profiles does not load their buffers.
+// Untouched token rows are reproducible from the model's initial seed.
 export function packModel(model) {
   if (weightBytes(model.width, model.vocabulary) <= 4 * 1024 ** 2) return model;
-  const packed = { ...model };
-  for (const key of weightFields) packed[key] = new Blob([model[key]]);
-  return packed;
+  const used = model.words.length * model.width;
+  return {
+    ...model,
+    input: new Blob([model.input.subarray(0, used)]),
+    output: new Blob([model.output.subarray(0, used)]),
+    prompts: new Blob([model.prompts]),
+    bias: new Blob([model.bias])
+  };
 }
 
-export async function loadModel(snapshot) {
+export async function loadModel(snapshot, { forTraining = true } = {}) {
   if (!snapshot.input) return makeModel(snapshot.width, snapshot.vocabulary);
   if (!(snapshot.input instanceof Blob)) return snapshot;
+  const fullTokenBytes = snapshot.width * snapshot.vocabulary * Float32Array.BYTES_PER_ELEMENT;
+  const initial = forTraining && snapshot.input.size < fullTokenBytes
+    ? makeModel(snapshot.width, snapshot.vocabulary)
+    : null;
   for (const key of weightFields) {
-    snapshot[key] = new Float32Array(await snapshot[key].arrayBuffer());
+    const weights = new Float32Array(await snapshot[key].arrayBuffer());
+    if (initial && (key === 'input' || key === 'output')) {
+      initial[key].set(weights);
+      snapshot[key] = initial[key];
+    } else {
+      snapshot[key] = weights;
+    }
   }
   return snapshot;
 }
