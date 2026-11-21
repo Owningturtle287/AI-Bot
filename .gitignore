@@ -1,0 +1,3 @@
+site/assets/*.png
+site/assets/*.zip
+__pycache__/

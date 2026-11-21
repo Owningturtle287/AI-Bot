@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15171c">
+  <meta name="description" content="Train a small neural chatbot with your own data, directly in your browser.">
+  <title>Neural Workshop</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon-192.png">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <div class="layout" id="layout">
+    <button class="scrim" id="scrim" aria-label="Close open panel" hidden></button>
+    <aside class="sidebar" id="sidebar" aria-label="Chats">
+      <a class="brand" href="./">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span>Neural Workshop</span>
+      </a>
+      <button class="new-chat" id="new-chat" disabled><i class="icon plus"></i> New chat</button>
+      <div class="sidebar-label">History</div>
+      <nav class="history" id="history" aria-label="Chat history"></nav>
+      <div class="sidebar-footer">
+        <button class="side-link" id="install"><i class="icon device"></i> Install app</button>
+        <div class="privacy"><i class="icon shield"></i><span>Stored on this device</span></div>
+      </div>
+    </aside>
+
+    <main class="chat">
+      <header class="chat-header">
+        <div class="chat-tools">
+          <button class="icon-button sidebar-toggle" id="toggle-sidebar" aria-label="Show chats" aria-controls="sidebar" aria-expanded="false"><i class="icon sidebar-icon"></i></button>
+          <label class="model-control">
+            <i class="icon sliders"></i><span class="sr-only">Model for this chat</span>
+            <select id="chat-model" disabled></select><i class="icon chevron"></i>
+          </label>
+        </div>
+        <button class="workshop-toggle" id="toggle-workshop" aria-controls="workshop" aria-expanded="false"><i class="icon bolt"></i><span>Training</span></button>
+      </header>
+
+      <div class="chat-scroll" id="chat-scroll">
+        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+          <div class="hero-mark" aria-hidden="true"><div class="brand-mark"><i></i><i></i><i></i><i></i></div></div>
+          <h1 id="welcome-title">Your model. Your data.</h1>
+          <p>Train a small neural model on your own examples,<br class="wide-break"> then see what it learned in chat.</p>
+          <div class="starter-grid">
+            <button class="starter" id="starter-card">
+              <span class="card-icon mint"><i class="icon book"></i></span>
+              <span><strong>Try the algebra pack</strong><small>1,212 worked examples</small></span>
+              <i class="icon next card-end"></i>
+            </button>
+            <button class="starter" id="upload-card">
+              <span class="card-icon lavender"><i class="icon upload"></i></span>
+              <span><strong>Upload a dataset</strong><small>Bring your own ZIP</small></span>
+              <i class="icon next card-end"></i>
+            </button>
+          </div>
+        </section>
+        <section class="messages" id="messages" aria-label="Conversation" aria-live="polite" hidden></section>
+      </div>
+
+      <div class="composer-area">
+        <form class="composer" id="composer">
+          <label class="sr-only" for="message">Message</label>
+          <textarea id="message" rows="1" maxlength="4000" placeholder="Message your model…" disabled></textarea>
+          <div class="compose-footer">
+            <label class="mode-control">
+              <span class="sr-only">Answer mode</span><i class="icon book" id="mode-icon"></i>
+              <select id="answer-mode" aria-describedby="mode-help"><option value="examples">Example answers</option><option value="neural">Neural generation</option></select><i class="icon chevron"></i>
+            </label>
+            <button class="send" id="send" aria-label="Send message" disabled><i class="icon up"></i></button>
+          </div>
+        </form>
+        <div class="mode-help" id="mode-help">Finds relevant answers in your training data.</div>
+      </div>
+    </main>
+
+    <aside class="workshop" id="workshop" aria-labelledby="workshop-title">
+      <header class="workshop-header">
+        <div class="workshop-name"><span class="workshop-icon"><i class="icon bolt"></i></span><h2 id="workshop-title">Training Studio</h2></div>
+        <button class="icon-button workshop-close" id="close-workshop" aria-label="Close Training Studio"><i class="icon close"></i></button>
+      </header>
+      <div class="workshop-body">
+        <section class="studio-section" aria-labelledby="profile-label">
+          <div class="section-heading">
+            <h3 id="profile-label">Model profile</h3>
+            <button class="quiet small" id="new-model" disabled><i class="icon plus"></i> New</button>
+          </div>
+          <div class="profile-card">
+            <div class="profile-top"><strong id="profile-name">Loading…</strong><span class="model-status" id="model-status" hidden></span></div>
+            <div class="profile-stats">
+              <div><strong id="parameter-count">—</strong><span>Parameters</span></div>
+              <div><strong id="seen-count">—</strong><span>Trained examples</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="studio-section training-data" aria-labelledby="dataset-label">
+          <div class="section-heading">
+            <h3 id="dataset-label">Training data</h3>
+            <button class="quiet small" id="formats">Formats</button>
+          </div>
+          <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+          <button class="dropzone" id="dropzone" type="button" disabled>
+            <span class="drop-icon"><i class="icon upload"></i></span>
+            <strong>Drop a ZIP file here</strong>
+            <span>or <b>browse files</b></span>
+            <small>JSONL, TXT or Markdown inside</small>
+          </button>
+          <div class="selected-file" id="selected-file" hidden>
+            <span class="file-icon"><i class="icon file-icon-shape"></i></span>
+            <div><strong id="file-name"></strong><small id="file-size"></small></div>
+            <button class="icon-button" id="remove-file" aria-label="Remove selected ZIP"><i class="icon close"></i></button>
+          </div>
+          <button class="quiet sample-link" id="load-starter" disabled><i class="icon book"></i> Load algebra starter pack</button>
+          <details class="settings">
+            <summary>Training settings<i class="icon chevron"></i></summary>
+            <div class="training-settings">
+              <label>Epochs<select id="epochs"><option value="1">1 pass</option><option value="2">2 passes</option><option value="4">4 passes</option><option value="8">8 passes</option></select></label>
+              <label>Learning rate<select id="rate"><option value="0.04">0.04</option><option value="0.08" selected>0.08</option><option value="0.12">0.12</option></select></label>
+            </div>
+          </details>
+          <button class="train" id="train" disabled><i class="icon bolt"></i><span>Start training</span></button>
+          <div class="run" id="run" hidden>
+            <div class="run-line"><strong id="run-label"></strong><span id="run-percent"></span></div>
+            <progress id="progress" max="1" value="0" aria-label="Training progress"></progress>
+            <small id="run-details"></small>
+          </div>
+          <p class="notice" id="notice" role="status" hidden></p>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <dialog id="model-dialog">
+    <form id="model-form" class="dialog-content">
+      <div class="dialog-heading"><h2>New model profile</h2><button type="button" class="icon-button" data-close aria-label="Close"><i class="icon close"></i></button></div>
+      <p>Choose the model capacity before training. Each profile saves its own weights and examples.</p>
+      <label class="field" for="model-name">Profile name<input id="model-name" placeholder="e.g. Algebra tutor" maxlength="48" required></label>
+      <label class="field" for="width">Hidden neurons<select id="width"></select></label>
+      <div class="capacity"><span>Trainable parameters</span><strong id="dialog-parameters"></strong></div>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close>Cancel</button><button type="submit" class="primary" id="save-model">Create model</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="formats-dialog">
+    <div class="dialog-content">
+      <div class="dialog-heading"><h2>Dataset formats</h2><button class="icon-button" data-close aria-label="Close"><i class="icon close"></i></button></div>
+      <p>Put UTF-8 text files in an unencrypted ZIP. For chat, use JSONL with one complete prompt and answer per line.</p>
+      <pre>{"prompt":"What is slope?","response":"Slope is rise divided by run."}</pre>
+      <p>JSONL also accepts instruction/output and user/assistant messages. TXT and Markdown train on passages and can be searched for excerpts.</p>
+      <p>For large collections, use several independently trainable ZIPs. Keep the app open during training.</p>
+      <a class="download" href="./assets/algebra-starter.zip" download><i class="icon upload"></i> Download the algebra starter ZIP</a>
+    </div>
+  </dialog>
+
+  <dialog id="install-dialog">
+    <div class="dialog-content">
+      <div class="dialog-heading"><h2>Install Neural Workshop</h2><button class="icon-button" data-close aria-label="Close"><i class="icon close"></i></button></div>
+      <p>Open this site in your browser and choose <strong>Install app</strong> or <strong>Add to Home Screen</strong> from the browser menu. On iPhone or iPad, use the Share menu in Safari.</p>
+    </div>
+  </dialog>
+</body>
+</html>
