@@ -39,6 +39,10 @@ const weightFields = ['input', 'prompts', 'output', 'bias'];
 export function packModel(model) {
   if (weightBytes(model.width, model.vocabulary) <= 4 * 1024 ** 2) return model;
   const used = model.words.length * model.width;
+  const checkpointBytes = used * Float32Array.BYTES_PER_ELEMENT * 2 + model.prompts.byteLength + model.bias.byteLength;
+  if (checkpointBytes <= 24 * 1024 ** 2) {
+    return { ...model, input: model.input.slice(0, used), output: model.output.slice(0, used) };
+  }
   return {
     ...model,
     input: new Blob([model.input.subarray(0, used)]),
@@ -50,13 +54,16 @@ export function packModel(model) {
 
 export async function loadModel(snapshot, { forTraining = true } = {}) {
   if (!snapshot.input) return makeModel(snapshot.width, snapshot.vocabulary);
-  if (!(snapshot.input instanceof Blob)) return snapshot;
+  const usesBlobs = snapshot.input instanceof Blob;
   const fullTokenBytes = snapshot.width * snapshot.vocabulary * Float32Array.BYTES_PER_ELEMENT;
-  const initial = forTraining && snapshot.input.size < fullTokenBytes
+  const savedTokenBytes = usesBlobs ? snapshot.input.size : snapshot.input.byteLength;
+  const initial = forTraining && savedTokenBytes < fullTokenBytes
     ? makeModel(snapshot.width, snapshot.vocabulary)
     : null;
+  if (!usesBlobs && !initial) return snapshot;
   for (const key of weightFields) {
-    const weights = new Float32Array(await snapshot[key].arrayBuffer());
+    const stored = snapshot[key];
+    const weights = stored instanceof Blob ? new Float32Array(await stored.arrayBuffer()) : stored;
     if (initial && (key === 'input' || key === 'output')) {
       initial[key].set(weights);
       snapshot[key] = initial[key];

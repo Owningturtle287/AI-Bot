@@ -1,6 +1,6 @@
 import { completeJob, failJob, firstJob, get, saveDraft, stopIfEmpty, updateJob } from './storage.mjs';
 import { run } from './trainer.mjs';
-import { loadModel, packModel } from './model.mjs';
+import { loadModel, packModel } from './model.mjs?v=5';
 
 export const QUEUE_KEY = 'training-queue';
 let active;
@@ -67,7 +67,7 @@ async function processQueue(emit, signal) {
     } catch (error) {
       if (signal.aborted) return;
       const detail = error.name === 'QuotaExceededError'
-        ? 'This device ran out of browser storage. Free space or choose a smaller model.'
+        ? 'The browser rejected the checkpoint for lack of storage. ' + error.message
         : error.message || stage + ' failed.';
       await failJob(job.id, detail);
       return;

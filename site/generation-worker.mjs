@@ -1,4 +1,4 @@
-import { generate, loadModel } from './model.mjs';
+import { generate, loadModel } from './model.mjs?v=5';
 import { get } from './storage.mjs';
 
 self.onmessage = async ({ data: { id, prompt } }) => {
