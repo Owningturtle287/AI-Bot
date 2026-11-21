@@ -1,8 +1,10 @@
-import { generate, makeModel, matchExample, parameters, WIDTHS } from './model.mjs';
+import { matchExample, MODEL_SIZES, parameters, VOCABULARY, weightBytes } from './model.mjs';
 import { enqueue, get, read, removeJob, save, setQueue } from './storage.mjs';
 
 const $ = id => document.getElementById(id);
 const format = new Intl.NumberFormat();
+const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 });
+const workerVersion = '?v=3';
 const state = {
   profiles: [], chats: [], chat: null, jobs: [], running: false, adding: false,
   loadingPack: false, sending: false, queueRead: 0
@@ -138,8 +140,10 @@ function updateProfile() {
   modelSelect.value = profile.id;
   $('profile-name').textContent = profile.name;
   $('profile-name').title = profile.name;
-  $('parameter-count').textContent = format.format(parameters(profile.model.width));
-  $('parameter-count').title = profile.model.width + ' hidden neurons';
+  const { width, vocabulary } = profile.model;
+  $('parameter-count').textContent = format.format(parameters(width, vocabulary));
+  $('parameter-count').title = format.format(width) + ' hidden neurons · '
+    + format.format(vocabulary ?? VOCABULARY) + ' vocabulary slots';
   $('seen-count').textContent = format.format(profile.model.rows);
   const status = $('model-status');
   status.hidden = false;
@@ -235,7 +239,7 @@ function renderQueue() {
 async function refreshQueue(refreshProfiles = false) {
   const readNumber = ++state.queueRead;
   const [jobs, control, profiles] = await Promise.all([
-    read('queue'), get('settings', 'training-queue'), refreshProfiles ? read('profiles') : null
+    read('queue'), get('settings', 'training-queue'), refreshProfiles ? readProfiles() : null
   ]);
   if (profiles) {
     for (const profile of profiles) {
@@ -269,7 +273,9 @@ function updateComposer() {
   $('send').disabled = input.disabled || state.sending || !input.value.trim();
   const neural = modeSelect.value === 'neural';
   $('mode-icon').className = 'icon ' + (neural ? 'bolt' : 'book');
-  $('mode-help').textContent = neural ? 'Generates text with your trained neural weights. Verify its answers.' : 'Finds relevant answers in your training data.';
+  $('mode-help').textContent = state.sending ? 'Generating a reply…'
+    : neural ? 'Generates text with your trained neural weights. Verify its answers.'
+    : 'Finds relevant answers in your training data.';
 }
 
 function render() {
@@ -288,14 +294,28 @@ function saveSelection() {
   save('settings', settings).catch(saveError);
 }
 
+async function readProfiles() {
+  return (await read('profiles')).map(({ model, ...profile }) => {
+    const { width, vocabulary, rows, updates } = model;
+    return { ...profile, model: { width, vocabulary, rows, updates } };
+  });
+}
+
+function newProfile(name, { width, vocabulary }) {
+  return {
+    id: crypto.randomUUID(), name, createdAt: Date.now(), revision: 0,
+    model: { width, vocabulary, rows: 0, updates: 0 }
+  };
+}
+
 async function boot() {
   try {
-    const [profiles, chats, settings] = await Promise.all([read('profiles'), read('chats'), read('settings')]);
+    const [profiles, chats, settings] = await Promise.all([readProfiles(), read('chats'), read('settings')]);
     const saved = settings.find(item => item.id === 'active');
     state.profiles = profiles.sort((a, b) => a.createdAt - b.createdAt);
     state.chats = chats;
     if (!profiles.length) {
-      const profile = { id: crypto.randomUUID(), name: 'Starter model', model: makeModel(32), createdAt: Date.now(), revision: 0 };
+      const profile = newProfile('Starter model', { width: 32, vocabulary: VOCABULARY });
       await save('profiles', profile);
       profiles.push(profile);
     }
@@ -331,13 +351,25 @@ modelSelect.addEventListener('change', async () => {
   updateProfile();
 });
 
-const widthSelect = $('width');
-widthSelect.replaceChildren(...WIDTHS.map(width => option(width + ' neurons', width)));
-const updateCapacity = () => { $('dialog-parameters').textContent = format.format(parameters(Number(widthSelect.value))); };
-widthSelect.addEventListener('change', updateCapacity);
+const sizeSelect = $('model-size');
+sizeSelect.replaceChildren(...MODEL_SIZES.map(({ width, vocabulary }, index) => {
+  const desktop = weightBytes(width, vocabulary) >= 64 * 1024 ** 2;
+  return option(compact.format(parameters(width, vocabulary)) + ' parameters' + (desktop ? ' · Desktop' : ''), index);
+}));
+function updateCapacity() {
+  const { width, vocabulary } = MODEL_SIZES[Number(sizeSelect.value)];
+  const bytes = weightBytes(width, vocabulary);
+  $('dialog-parameters').textContent = format.format(parameters(width, vocabulary));
+  $('dialog-weights').textContent = formatBytes(bytes);
+  $('dialog-shape').textContent = format.format(width) + ' neurons · ' + format.format(vocabulary) + ' vocabulary slots';
+  $('dialog-desktop').hidden = bytes < 64 * 1024 ** 2;
+}
+sizeSelect.addEventListener('change', updateCapacity);
 $('new-model').addEventListener('click', () => {
   $('model-form').reset();
-  widthSelect.value = String(activeProfile().model.width);
+  const { width, vocabulary = VOCABULARY } = activeProfile().model;
+  const current = MODEL_SIZES.findIndex(size => size.width === width && size.vocabulary === vocabulary);
+  sizeSelect.value = String(Math.max(0, current));
   updateCapacity();
   $('model-dialog').showModal();
 });
@@ -352,7 +384,7 @@ $('model-form').addEventListener('submit', async event => {
   const create = $('save-model');
   if (create.disabled) return;
   create.disabled = true;
-  const profile = { id: crypto.randomUUID(), name, model: makeModel(Number(widthSelect.value)), createdAt: Date.now(), revision: 0 };
+  const profile = newProfile(name, MODEL_SIZES[Number(sizeSelect.value)]);
   try {
     await save('profiles', profile);
     state.profiles.push(profile);
@@ -507,7 +539,7 @@ let registration;
 let fallback;
 const queueService = () => {
   const worker = registration?.active || navigator.serviceWorker?.controller;
-  return worker && new URL(worker.scriptURL).search === '?v=2' ? worker : null;
+  return worker && new URL(worker.scriptURL).search === workerVersion ? worker : null;
 };
 
 function receiveTraining({ data }) {
@@ -574,7 +606,7 @@ function resumeVisible() {
 navigator.serviceWorker?.addEventListener('message', receiveTraining);
 navigator.serviceWorker?.addEventListener('controllerchange', resumeVisible);
 if (navigator.serviceWorker) {
-  navigator.serviceWorker.register('./sw.js?v=2', { type: 'module' }).then(result => {
+  navigator.serviceWorker.register('./sw.js' + workerVersion, { type: 'module' }).then(result => {
     registration = result;
     resumeVisible();
   }).catch(() => wakeTraining());
@@ -591,12 +623,23 @@ setInterval(() => {
   if (!document.hidden && state.running) wakeTraining();
 }, 9000);
 
-function reply(profile, prompt) {
+async function reply(profile, prompt) {
   if (!profile.model.updates) return { text: 'This model is ready to train. Open Training Studio, load the algebra starter pack or upload a ZIP, and choose Start training.' };
   if (modeSelect.value === 'neural') {
-    return { text: generate(profile.model, prompt) || 'The model needs more training data before it can generate a response.', detail: 'Generated by your experimental neural model' };
+    const worker = new Worker(new URL('./generation-worker.mjs', import.meta.url), { type: 'module' });
+    try {
+      const text = await new Promise((resolve, reject) => {
+        worker.onmessage = ({ data }) => data.error ? reject(new Error(data.error)) : resolve(data.text);
+        worker.onerror = event => reject(new Error(event.message || 'The generation worker stopped.'));
+        worker.postMessage({ id: profile.id, prompt });
+      });
+      return { text: text || 'The model needs more training data before it can generate a response.', detail: 'Generated by your experimental neural model' };
+    } finally {
+      worker.terminate();
+    }
   }
-  const example = matchExample(profile.model, prompt);
+  const { model } = await get('profiles', profile.id);
+  const example = matchExample(model, prompt);
   if (!example) return { text: 'I couldn’t find a close example in this model’s data. Try a question from the training pack, or add worked examples on this topic.' };
   return { text: example.response, detail: [example.kind, example.source, example.kind === 'Related example' ? example.prompt : ''].filter(Boolean).join(' · ') };
 }
@@ -610,7 +653,7 @@ $('composer').addEventListener('submit', async event => {
   updateTraining();
   updateComposer();
   try {
-    const answer = reply(profile, prompt);
+    const answer = await reply(profile, prompt);
     const original = state.chat;
     const messages = [...original.messages, { role: 'user', text: prompt }, { role: 'assistant', model: profile.name, ...answer }];
     const chat = { ...original, title: original.messages.length ? original.title : prompt.slice(0, 70), updatedAt: Date.now(), messages };

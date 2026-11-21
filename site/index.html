@@ -144,8 +144,13 @@
       <div class="dialog-heading"><h2>New model profile</h2><button type="button" class="icon-button" data-close aria-label="Close"><i class="icon close"></i></button></div>
       <p>Choose the model capacity before training. Each profile saves its own weights and examples.</p>
       <label class="field" for="model-name">Profile name<input id="model-name" placeholder="e.g. Algebra tutor" maxlength="48" required></label>
-      <label class="field" for="width">Hidden neurons<select id="width"></select></label>
-      <div class="capacity"><span>Trainable parameters</span><strong id="dialog-parameters"></strong></div>
+      <label class="field" for="model-size">Model size<select id="model-size" aria-describedby="dialog-shape"></select></label>
+      <div class="capacity">
+        <div><span>Trainable parameters</span><strong id="dialog-parameters"></strong></div>
+        <div><span>Weight storage</span><strong id="dialog-weights"></strong></div>
+      </div>
+      <div class="model-detail" id="dialog-shape"></div>
+      <p class="model-detail" id="dialog-desktop" hidden>Use a desktop for this size. Training and checkpoints need additional memory and storage.</p>
       <div class="dialog-actions"><button type="button" class="quiet" data-close>Cancel</button><button type="submit" class="primary" id="save-model">Create model</button></div>
     </form>
   </dialog>

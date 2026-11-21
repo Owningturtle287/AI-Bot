@@ -377,3 +377,9 @@ dialog::backdrop { background: #08090cbb; backdrop-filter: blur(3px); }
 .queue-list .file-icon .icon { width: 17px; height: 17px; }
 .queue-list .icon-button:disabled { opacity: .4; }
 .field textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--field-bg); }
+
+.capacity > div { display: grid; gap: 2px; }
+.capacity > div + div { text-align: right; }
+.capacity span, .model-detail { font-size: 13px; }
+.capacity strong { font-variant-numeric: tabular-nums; }
+.model-detail { color: var(--muted); }

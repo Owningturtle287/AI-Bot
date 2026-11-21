@@ -4,7 +4,7 @@ Neural Workshop is an installable chatbot and training studio that runs on the d
 
 ## Train a model
 
-1. Open **New chat**. Under **Training Studio**, choose **New** to set a profile name and capacity. Select a saved model from the chat header.
+1. Open **New chat**. Under **Training Studio**, choose **New**, enter a profile name, and select a **Model size**. The dialog shows the exact parameter count and weight storage. Select a saved model from the chat header.
 2. Select or drop multiple ZIPs at once. **ZIP links** accepts direct HTTPS links from servers that allow browser downloads. **Algebra pack** adds 1,212 worked Algebra I and II examples. Each ZIP is assigned to the selected model and training settings when added.
 3. Choose **Start queue**. Neural Workshop downloads and trains the ZIPs one at a time, in the order they were added. Each completed ZIP saves to its model profile and releases its archive storage. If a ZIP fails, retry it or remove it to continue. The number of queued ZIPs depends on available browser storage.
 4. In **Example answers** mode, ask “What is slope?” or “How do I factor a quadratic?” The chat shows the matching answer and its source file. Switch to **Neural generation** to sample text from the trained weights. The small model starts with random weights and may produce incorrect or incoherent text.
@@ -38,7 +38,9 @@ Use different seeds for additional archives or separate evaluation examples. The
 
 ## Model and local development
 
-The experimental prompt-conditioned language model uses a 2,048-slot token vocabulary and a configurable hidden width of 16 to 128 neurons. It trains token embeddings, prompt features, output weights and biases with a sampled next-token objective. Profile sizes range from 71,680 to 559,104 parameters. Changing capacity means creating a separate model profile. Example answers search a sample of imported data for reliable recall between training runs.
+The experimental prompt-conditioned language model trains token embeddings, prompt features, output weights and biases with a sampled next-token objective. Its presets range from 71,680 to 67,403,776 trainable parameters, with hidden widths of 16 to 1,024 and vocabulary capacities of 2,048 to 32,768 tokens. Changing capacity means creating a separate profile. The app allocates its weights when the first ZIP starts training.
+
+The 67.4-million-parameter preset uses about 257 MiB for its Float32 weights. Training and writing checkpoints take additional memory and storage, so the largest presets are intended for desktops. Example answers use the saved example sample. Neural generation loads the weights in a worker. A 50-billion-parameter model would need 200 GB for Float32 weights alone and would require a separate compute backend.
 
 ```sh
 python3 tools/icons.py site/assets

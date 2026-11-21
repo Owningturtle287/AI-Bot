@@ -1,23 +1,55 @@
 export const VOCABULARY = 2048;
 const FEATURES = 256;
 const MAX_TOKENS = 128;
-export const WIDTHS = [16, 32, 48, 64, 96, 128];
-export const parameters = width => (VOCABULARY * 2 + FEATURES) * width + VOCABULARY;
+export const MODEL_SIZES = [
+  ...[16, 32, 48, 64, 96, 128].map(width => ({ width, vocabulary: VOCABULARY })),
+  { width: 128, vocabulary: 4096 },
+  { width: 256, vocabulary: 4096 },
+  { width: 256, vocabulary: 8192 },
+  { width: 512, vocabulary: 8192 },
+  { width: 512, vocabulary: 16384 },
+  { width: 1024, vocabulary: 16384 },
+  { width: 1024, vocabulary: 32768 }
+];
+export const parameters = (width, vocabulary = VOCABULARY) => (vocabulary * 2 + FEATURES) * width + vocabulary;
+export const weightBytes = (width, vocabulary) => parameters(width, vocabulary) * Float32Array.BYTES_PER_ELEMENT;
 
-export function makeModel(width) {
-  if (!WIDTHS.includes(width)) throw new Error('Unsupported model width.');
+export function makeModel(width, vocabulary = VOCABULARY) {
+  if (!MODEL_SIZES.some(size => size.width === width && size.vocabulary === vocabulary)) {
+    throw new Error('Unsupported model size.');
+  }
   const model = {
-    width, rows: 0, updates: 0, seed: 193057, examples: [],
+    width, vocabulary, rows: 0, updates: 0, seed: 193057, examples: [],
     words: ['', '', ''],
-    input: new Float32Array(VOCABULARY * width),
+    input: new Float32Array(vocabulary * width),
     prompts: new Float32Array(FEATURES * width),
-    output: new Float32Array(VOCABULARY * width),
-    bias: new Float32Array(VOCABULARY)
+    output: new Float32Array(vocabulary * width),
+    bias: new Float32Array(vocabulary)
   };
+  const scale = 0.25 * Math.sqrt(128 / Math.max(128, width));
   for (const weights of [model.input, model.prompts, model.output]) {
-    for (let i = 0; i < weights.length; i++) weights[i] = (random(model) - 0.5) * 0.25;
+    for (let i = 0; i < weights.length; i++) weights[i] = (random(model) - 0.5) * scale;
   }
   return model;
+}
+
+const weightFields = ['input', 'prompts', 'output', 'bias'];
+
+// Store large weights as blobs so listing profiles does not load their buffers.
+export function packModel(model) {
+  if (weightBytes(model.width, model.vocabulary) <= 4 * 1024 ** 2) return model;
+  const packed = { ...model };
+  for (const key of weightFields) packed[key] = new Blob([model[key]]);
+  return packed;
+}
+
+export async function loadModel(snapshot) {
+  if (!snapshot.input) return makeModel(snapshot.width, snapshot.vocabulary);
+  if (!(snapshot.input instanceof Blob)) return snapshot;
+  for (const key of weightFields) {
+    snapshot[key] = new Float32Array(await snapshot[key].arrayBuffer());
+  }
+  return snapshot;
 }
 
 function random(state) {
@@ -81,13 +113,15 @@ function logit(model, id, hidden) {
 
 export function trainer(model, rate) {
   const vocabulary = new Map(model.words.slice(3).map((word, i) => [word, i + 3]));
+  const vocabularyLimit = model.vocabulary ?? VOCABULARY;
+  const stepSize = rate * Math.sqrt(128 / Math.max(128, model.width));
   const seen = new Set(model.examples.map(example => normalized(example.prompt || example.response)));
   const hidden = new Float32Array(model.width);
   const gradient = new Float32Array(model.width);
 
   function tokenId(word) {
     if (vocabulary.has(word)) return vocabulary.get(word);
-    if (model.words.length >= VOCABULARY) return 2;
+    if (model.words.length >= vocabularyLimit) return 2;
     const id = model.words.length;
     vocabulary.set(word, id);
     model.words.push(word);
@@ -126,7 +160,7 @@ export function trainer(model, rate) {
       let index = 0;
       for (const candidate of candidates) {
         const probability = Math.exp(scores[index++] - maximum) / total;
-        const change = rate * (Number(candidate === target) - probability);
+        const change = stepSize * (Number(candidate === target) - probability);
         const offset = candidate * model.width;
         for (let j = 0; j < model.width; j++) {
           gradient[j] += change * model.output[offset + j];

@@ -1,4 +1,4 @@
-import { trainer } from './model.mjs';
+import { trainer, weightBytes } from './model.mjs';
 import { lines, readZip } from './zip.mjs';
 
 function conversation(row) {
@@ -34,6 +34,7 @@ async function run({ file, model, epochs, rate, cursor }, post, { checkpoint, si
   let loss = cursor?.loss ?? null;
   let lastReport = 0;
   let lastSave = performance.now();
+  const saveInterval = Math.max(12000, weightBytes(model.width, model.vocabulary) / (4 * 1024 ** 2) * 1000);
 
   for (let epoch = cursor?.epoch ?? 1; epoch <= epochs; epoch++) {
     const resumingEpoch = cursor?.epoch === epoch;
@@ -90,7 +91,7 @@ async function run({ file, model, epochs, rate, cursor }, post, { checkpoint, si
             }
           }
         }
-        if (checkpoint && lineNumber % 512 === 0 && performance.now() - lastSave >= 12000) {
+        if (checkpoint && lineNumber % 512 === 0 && performance.now() - lastSave >= saveInterval) {
           await saveCursor(lineNumber);
         }
       }
